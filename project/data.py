@@ -1,9 +1,12 @@
 import os, torch, csv
-from multiprocessing import Manager
+
+from os import PathLike
 from typing import List
+from multiprocessing import Manager
+from transformers import AutoTokenizer
 
 class WSDDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir, tokenizer, mlm, method, dataset_name=None, mlm_prob=0.15):
+    def __init__(self, data_dir: PathLike, tokenizer: AutoTokenizer, mlm: bool, method: str, dataset_name: str = '', mlm_prob: float = 0.15):
         self.manager = Manager()
         self.dataset_name = dataset_name
         self.tokenizer = tokenizer
@@ -17,7 +20,7 @@ class WSDDataset(torch.utils.data.Dataset):
         else:
             self.load_keys(os.path.join(data_dir, 'examples', 'semcor_train_token_cls.csv'))
     
-    def load_keys(self, input_file):
+    def load_keys(self, input_file: PathLike):
         # Don't use standard list because of known memory leak with copy-on-read https://github.com/pytorch/pytorch/issues/13246
         self.data = self.manager.list()
         with open(input_file, "r", encoding="'iso-8859-1'") as f:
@@ -42,7 +45,7 @@ class WSDDataset(torch.utils.data.Dataset):
             else:
                 raise NotImplementedError(f"Method {self.method} not implemented.")
                 
-    def load_gold_keys(self, gold_key_file):
+    def load_gold_keys(self, gold_key_file: PathLike):
         gold_keys = {}
         with open(gold_key_file, "r", encoding="utf-8") as f:
             s = f.readline().strip()
@@ -88,7 +91,7 @@ class WSDDataset(torch.utils.data.Dataset):
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
         return inputs, labels        
         
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         data = self.data[idx]                    
         if self.method == 'bgp':
             sentence = str(data[2])

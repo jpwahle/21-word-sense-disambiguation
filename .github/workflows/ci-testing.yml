@@ -34,7 +34,7 @@ jobs:
     - name: Setup macOS
       if: runner.os == 'macOS'
       run: |
-        brew install libomp  # https://github.com/pytorch/pytorch/issues/20030
+        brew install libomp unzip # https://github.com/pytorch/pytorch/issues/20030
 
     # Note: This uses an internal pip API and may not always work
     # https://github.com/actions/cache/blob/master/examples.md#multiple-oss-in-a-workflow
@@ -55,10 +55,18 @@ jobs:
       run: |
         pip install --requirement requirements.txt --upgrade --quiet --find-links https://download.pytorch.org/whl/cpu/torch_stable.html --use-feature=2020-resolver
         pip install --requirement tests/requirements.txt --quiet --use-feature=2020-resolver
+        pip install -e .
         python --version
         pip --version
         pip list
       shell: bash
+
+    - name: Pull and Extract Data
+      uses: wei/wget@v1
+      with:
+        args: -O data.zip https://gilbert-20.s3.us-east-2.amazonaws.com/data/data.zip
+      run: |
+        unzip data.zip
 
     - name: Tests
       run: |

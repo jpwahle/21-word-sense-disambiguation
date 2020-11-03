@@ -25,7 +25,7 @@ def indexed_chunk_list(li, chunk_sizes):
         else:
             break
 
-def add_generic_args(parser, root_dir) -> None:
+def add_generic_args(parser) -> None:
     #  To allow all pl args uncomment the following line
     #  parser = pl.Trainer.add_argparse_args(parser)
     parser.add_argument(
@@ -65,13 +65,16 @@ def add_generic_args(parser, root_dir) -> None:
     )
     parser.add_argument("--seed", type=int, default=42, help="random seed for initialization")
     parser.add_argument("--model_name_or_path", type=str, help="Generic Model Name from huggingface models")
-    parser.add_argument("--num_train_epochs", type=int, help="Number of epochs to train")
+    parser.add_argument("--max_epochs", type=int, help="Number of epochs to train")
+    parser.add_argument("--progress_bar_refresh_rate", type=int, default=10, help="Number of epochs to train")
+    parser.add_argument("--val_check_interval", type=float, default=.25, help="Number of epochs to train")
     parser.add_argument("--batch_size", type=int, help="Batch size for training, eval and test.")
+    parser.add_argument("--auto_scale_batch_size", default='binsearch' if torch.cuda.device_count() == 1 else False, help="Batch size for training, eval and test.")
     parser.add_argument("--method", type=str, help="Method to use (BGP, BGP-M, MCGP)")
     parser.add_argument("--gpus", type=str, default=torch.cuda.device_count(), help="Which GPUs to use. Either list of ids or num_gpus. Defaults to device_count().")
     parser.add_argument("--learning_rate", type=float, default=2e-5, help="Learning rate for training")
-    parser.add_argument("--shuffle", action="store_true", default=True, help="Shuffle the training dataset or not")
-    parser.add_argument("--tpu_num_cores", type=int, help="Learning rate for training")
+    parser.add_argument("--shuffle", action="store_true", help="Shuffle the training dataset or not")
+    parser.add_argument("--gradient_checkpointing", action="store_true", help="Shuffle the training dataset or not")
     parser.add_argument("--num_workers", type=int, default=multiprocessing.cpu_count(), help="Number of workers. Defualts to multiprocessing.cpu_count()")
     parser.add_argument(
         "--data_dir",

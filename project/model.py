@@ -1,39 +1,51 @@
-import torch, os, multiprocessing, json, subprocess, tqdm
+import torch, os, multiprocessing
 import pytorch_lightning as pl
 
-from subprocess import STDOUT, PIPE
-from itertools import groupby
+from argparse import Namespace
 from typing import Dict, Any
-
-from transformers import AutoModelForSequenceClassification, AutoModelForPreTraining, AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoModelForPreTraining, AutoModelForSequenceClassification, AutoConfig, AutoTokenizer
 from torch.utils.data import DataLoader
-from helpers import squeeze_collator, indexed_chunk_list
+from itertools import groupby
+
+from project.helpers import squeeze_collator, indexed_chunk_list
+from project.data import WSDDataset
 
 class GilBERTFinetuner(pl.LightningModule):
 
-    def __init__(self, hparams, config, tokenizer, train_dataset, val_datasets):
-        super(GilBERTFinetuner, self).__init__()
+    def __init__(self, hparams: Namespace):
+        super().__init__()
+
+        self.hparams = Namespace(**hparams) if type(hparams) == dict else hparams
+        self.mlm = self.hparams.mlm if 'mlm' in self.hparams else False
+        self.create_components()
+
+    
+    def create_components(self):
+        config = AutoConfig.from_pretrained(
+            self.hparams.model_name_or_path,
+            num_labels=2,
+            hidden_dropout_prob=self.hparams.hidden_dropout_prob,
+            gradient_checkpointing=self.hparams.gradient_checkpointing,
+        )
         
-        if hparams.mlm:
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.hparams.model_name_or_path,
+            model_max_length=self.hparams.max_seq_length,
+            use_fast=True
+        )
+        
+        if self.mlm:
             self.lm = AutoModelForPreTraining.from_pretrained(
-                hparams.model_name_or_path,
-                from_tf=bool(".ckpt" in hparams.model_name_or_path),
+                self.hparams.model_name_or_path,
+                from_tf=bool(".ckpt" in self.hparams.model_name_or_path),
                 config=config
             )
         else:
             self.lm = AutoModelForSequenceClassification.from_pretrained(
-                hparams.model_name_or_path,
-                from_tf=bool(".ckpt" in hparams.model_name_or_path),
+                self.hparams.model_name_or_path,
+                from_tf=bool(".ckpt" in self.hparams.model_name_or_path),
                 config=config,
             )
-
-        self.tokenizer = tokenizer
-        self.train_dataset = train_dataset
-        self.val_datasets = val_datasets
-        self.learning_rate = hparams.learning_rate
-        self.batch_size = hparams.batch_size
-        self.hparams = hparams
-        self.mlm = hparams.mlm if 'mlm' in hparams else False
     
     def forward(self, inputs):
         # fwd
@@ -42,7 +54,7 @@ class GilBERTFinetuner(pl.LightningModule):
     def training_step(self, batch, batch_nb=None):        
         # fwd
         loss = self.forward(batch)[0]
-        if self.hparams.mlm:
+        if self.mlm:
             loss = loss.mean()
         return loss
 
@@ -56,7 +68,7 @@ class GilBERTFinetuner(pl.LightningModule):
     def validation_epoch_end(self, outputs):            
         avg_loss = torch.stack([x['val_loss'] for el in outputs for x in el]).mean()
         
-        return {'avg_val_loss': avg_loss, 'progress_bar': {'avg_val_loss': avg_loss}}
+        return {'val_loss': avg_loss, 'progress_bar': {'val_loss': avg_loss}}
     
     def test_step(self, val_batch, batch_idx=None, dataset_idx=None):
         # fwd
@@ -92,8 +104,8 @@ class GilBERTFinetuner(pl.LightningModule):
                             local_ok += 1
                         else:
                             local_notok += 1
-                    ok += local_ok/len(predicted_synsets[key])
-                    notok += local_notok/len(predicted_synsets[key])
+                    ok += local_ok / len(predicted_synsets[key])
+                    notok += local_notok / len(predicted_synsets[key])
                 else:
                     break
                         
@@ -149,44 +161,43 @@ class GilBERTFinetuner(pl.LightningModule):
         
         return predicted_synsets
     
-    def compile_java(self, java_file):
-        subprocess.check_call(["javac", java_file])
-
-    def run_scorer(self, java_file, test_dataset, output_eval_file):
-        java_class, _ = os.path.splitext(java_file)
-        cmd = ["java", java_class, os.path.join(self.hparams.data_dir, 'gold_keys', f'{test_dataset.dataset_name}.gold.key.txt'), output_eval_file]
-        proc = subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT)
-        stdout, _ = proc.communicate(input="SomeInputstring")
-        result = stdout.decode("utf-8").split("\n")
-        result = [s.split("=\t") for s in result]
-        result = {s[0]: s[1][:-1].replace(",", ".") for s in result if len(s) == 2}
-        return result
-    
     def configure_optimizers(self):
-        return torch.optim.AdamW([p for p in self.parameters() if p.requires_grad], lr=self.learning_rate)
+        return torch.optim.AdamW([p for p in self.parameters() if p.requires_grad], lr=self.hparams.learning_rate)
     
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, shuffle=self.hparams.shuffle, num_workers=(self.hparams.num_workers or multiprocessing.cpu_count()), batch_size=self.batch_size, collate_fn=squeeze_collator, pin_memory=True if torch.cuda.is_available and torch.cuda.device_count() > 1 else False)
+        self.train_dataset = WSDDataset(data_dir=self.hparams.data_dir, tokenizer=self.tokenizer, dataset_name="train", mlm=self.mlm, method=self.hparams.method)
+        return DataLoader(self.train_dataset, shuffle=self.hparams.shuffle, num_workers=(self.hparams.num_workers or multiprocessing.cpu_count()), batch_size=self.hparams.batch_size, collate_fn=squeeze_collator, pin_memory=True if torch.cuda.is_available and torch.cuda.device_count() > 1 else False)
     
     def val_dataloader(self):
+        self.val_datasets= [              
+            WSDDataset(data_dir=self.hparams.data_dir, tokenizer=self.tokenizer, dataset_name=eval_name, mlm=False, method=self.hparams.method) for eval_name in self.hparams.eval_names
+        ]
         return [              
-            DataLoader(val_dataset, num_workers=(self.hparams.num_workers or multiprocessing.cpu_count()), batch_size=self.batch_size, collate_fn=squeeze_collator, pin_memory=True if torch.cuda.is_available and torch.cuda.device_count() > 1 else False, shuffle=False) for val_dataset in self.val_datasets
+            DataLoader(val_dataset, num_workers=(self.hparams.num_workers or multiprocessing.cpu_count()), batch_size=self.hparams.batch_size, collate_fn=squeeze_collator, pin_memory=True if torch.cuda.is_available and torch.cuda.device_count() > 1 else False, shuffle=False) for val_dataset in self.val_datasets
         ]
         
     def test_dataloader(self):
+        self.test_datasets= [              
+            WSDDataset(data_dir=self.hparams.data_dir, tokenizer=self.tokenizer, dataset_name=eval_name, mlm=False, method=self.hparams.method) for eval_name in self.hparams.eval_names
+        ]
         return [              
-            DataLoader(val_dataset, num_workers=(self.hparams.num_workers or multiprocessing.cpu_count()), batch_size=self.batch_size, collate_fn=squeeze_collator, pin_memory=True if torch.cuda.is_available and torch.cuda.device_count() > 1 else False, shuffle=False) for val_dataset in self.val_datasets
+            DataLoader(test_datasets, num_workers=(self.hparams.num_workers or multiprocessing.cpu_count()), batch_size=self.hparams.batch_size, collate_fn=squeeze_collator, pin_memory=True if torch.cuda.is_available and torch.cuda.device_count() > 1 else False, shuffle=False) for test_datasets in self.test_datasets
         ]
         
     @pl.utilities.rank_zero_only
-    def on_save_checkpoint(self) -> None:
-        save_path = self.output_dir.joinpath("best_tfmr")
-        self.model.config.save_step = self.step_count
-        self.model.save_pretrained(save_path)
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        save_path = os.path.join(self.hparams.output_dir, self.hparams.model_name_or_path, 'best_checkpoint')
+        self.lm.save_pretrained(save_path)
         self.tokenizer.save_pretrained(save_path)
     
+    @pl.utilities.rank_zero_only
+    def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        save_path = os.path.join(self.hparams.output_dir, self.hparams.model_name_or_path, 'best_checkpoint')
+        self.lm.from_pretrained(save_path)
+        self.tokenizer.from_pretrained(save_path)
+    
     @staticmethod
-    def add_model_specific_args(parser, root_dir):
+    def add_model_specific_args(parser):
         parser.add_argument(
             "--max_seq_length",
             default=128,
@@ -200,6 +211,6 @@ class GilBERTFinetuner(pl.LightningModule):
         parser.add_argument(
             "--mlm", action="store_true", help="Use Masked Language Modeling or not"
         )
-        parser.add_argument("--hidden_dropout_prob", type=float, default=0.2, help="Learning rate for training")
+        parser.add_argument("--hidden_dropout_prob", type=float, default=0.1, help="Learning rate for training")
 
         return parser
