@@ -61,10 +61,12 @@ jobs:
         pip list
       shell: bash
 
-    - name: Pull and Extract Data
+    - name: Pull Data
       uses: wei/wget@v1
       with:
         args: -O data.zip https://gilbert-20.s3.us-east-2.amazonaws.com/data/data.zip
+
+    - name: Pull Data
       run: |
         unzip data.zip
 
