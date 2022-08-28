@@ -3,7 +3,7 @@
 # Incorporating Word Sense Disambiguation in Neural Language Models
 
 [![Paper](http://img.shields.io/badge/paper-arxiv.2106.07967-B31B1B.svg)](https://arxiv.org/abs/2106.07967)
-[![Models](https://img.shields.io/badge/Huggingface-Models-lightgrey)](https://huggingface.co/jpelhaw)
+[![Models](https://img.shields.io/badge/Huggingface-Models-lightgrey)](https://huggingface.co/jpwahle/t5-word-sense-disambiguation)
 [![CI testing anonymous](https://img.shields.io/badge/build-passing-brightgreen)]()
 
 </div>
