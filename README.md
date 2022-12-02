@@ -98,7 +98,7 @@ We evaluated GLUE with the [official scripts](https://github.com/huggingface/tra
 
 You can download pretrained models here:
 
-- [Huggingface Hub](https://huggingface.co/jpelhaw).
+- [Huggingface Hub](https://huggingface.co/jpwahle).
 
 ## Results
 
